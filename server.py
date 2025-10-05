@@ -536,27 +536,35 @@ def prune_inactive_sessions(inactive_seconds: int = 30) -> None:
             sharer = s.get("sharer")
             renter = s.get("renter")
 
-            # user last poll timestamps (explicitly coerce to floats; missing -> 0.0)
-            sharer_last_poll = float(server_state["users"].get(sharer, {}).get("last_poll_ts") or 0.0)
-            renter_last_poll = float(server_state["users"].get(renter, {}).get("last_poll_ts") or 0.0)
+            # Get user dicts safely
+            sharer_user = server_state["users"].get(sharer, {})
+            renter_user = server_state["users"].get(renter, {})
+
+            # Use session_last_poll_ts if available, otherwise fall back to last_activity_ts or now
+            sharer_last_poll = sharer_user.get("session_last_poll_ts")
+            if sharer_last_poll is None:
+                sharer_last_poll = now
+                sharer_user["session_last_poll_ts"] = now
+
+            renter_last_poll = renter_user.get("session_last_poll_ts")
+            if renter_last_poll is None:
+                renter_last_poll = now
+                renter_user["session_last_poll_ts"] = now
 
             # session-level last activity (fallback to session.timestamp if present)
             session_last = float(s.get("last_activity_ts") or s.get("timestamp") or 0.0)
 
-            # Last known activity for each role is the more recent of the user's poll or any session activity.
-            # This prevents prunes while someone is actively interacting with the session.
-            sharer_last = max(sharer_last_poll, session_last)
-            renter_last = max(renter_last_poll, session_last)
+            # Last known activity for each role is the more recent of session_last_poll_ts or session-level activity
+            sharer_last = max(float(sharer_last_poll), session_last)
+            renter_last = max(float(renter_last_poll), session_last)
 
-            sharer_inactive = (sharer_last == 0.0) or (now - sharer_last > inactive_seconds)
-            renter_inactive = (renter_last == 0.0) or (now - renter_last > inactive_seconds)
+            sharer_inactive = (now - sharer_last > inactive_seconds)
+            renter_inactive = (now - renter_last > inactive_seconds)
 
-            # debug: print detailed info every time for visibility (remove/quiet later)
+            # debug info
             print(
                 "[PRUNE-CHECK] token", s.get("token"),
-                f"sharer_last={sharer_last:.1f}s (poll={sharer_last_poll:.1f}s),",
-                f"renter_last={renter_last:.1f}s (poll={renter_last_poll:.1f}s),",
-                f"threshold={inactive_seconds}s"
+                f"sharer_last={sharer_last:.1f}s, renter_last={renter_last:.1f}s, threshold={inactive_seconds}s"
             )
 
             if sharer_inactive and renter_inactive:
@@ -564,7 +572,6 @@ def prune_inactive_sessions(inactive_seconds: int = 30) -> None:
                       f"(sharer:{now - sharer_last:.1f}s renter:{now - renter_last:.1f}s)")
                 _end_session(s, reason="inactive")
             else:
-                # optional debug for skipped sessions
                 print(f"[PRUNE-SKIP] Keeping session {s.get('token')} (sharer_active={not sharer_inactive}, renter_active={not renter_inactive})")
 
 
@@ -1329,8 +1336,10 @@ def signal_poll(token: str = Query(...), role: str = Query(...), since: int = Qu
         now = time.time()
         if role == "sharer":
             server_state["users"].get(session.get("sharer"), {})["last_poll_ts"] = now
+            server_state["users"].get(session.get("sharer"), {})["session_last_poll_ts"] = now
         else:
             server_state["users"].get(session.get("renter"), {})["last_poll_ts"] = now
+            server_state["users"].get(session.get("renter"), {})["session_last_poll_ts"] = now
 
         session["last_activity_ts"] = now
         mark_users_dirty()
@@ -1422,5 +1431,6 @@ if __name__ == "__main__":
         print("[ERROR] uvicorn failed:", exc)
         # Fallback in case of any unexpected error
         uvicorn.run("server:app", host="0.0.0.0", port=8000, log_level="info")
+
 
 

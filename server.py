@@ -1389,26 +1389,38 @@ def _on_startup():
 # ---------------------------
 # Start background thread then run uvicorn if main
 if __name__ == "__main__":
-    
-
+    import os
     import uvicorn
 
-    # Prefer env vars, then fallback to local files
+    # Prefer environment variables for certs, fallback to local files
     ssl_certfile = os.environ.get("SSL_CERTFILE", "server.crt")
     ssl_keyfile = os.environ.get("SSL_KEYFILE", "server.key")
 
-    # Only enable TLS if both files exist
-    use_tls = bool(ssl_certfile and ssl_keyfile and os.path.exists(ssl_certfile) and os.path.exists(ssl_keyfile))
+    # Enable TLS only if both files exist
+    use_tls = os.path.exists(ssl_certfile) and os.path.exists(ssl_keyfile)
 
     try:
         if use_tls:
-            print("[START] Running with TLS (wss://)")
-            uvicorn.run("server:app", host="0.0.0.0", port=8000,
-                        log_level="info", ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile)
+            print("[START] Running with TLS (https://)")
+            uvicorn.run(
+                "server:app",
+                host="0.0.0.0",
+                port=8000,
+                log_level="info",
+                ssl_certfile=ssl_certfile,
+                ssl_keyfile=ssl_keyfile
+            )
         else:
-            print("[START] TLS cert/key not found - running without TLS (ws://). Set SSL_CERTFILE/SSL_KEYFILE to enable.")
-            uvicorn.run("server:app", host="0.0.0.0", port=8000, log_level="info")
+            print("[START] TLS cert/key not found - running without TLS (http://).")
+            uvicorn.run(
+                "server:app",
+                host="0.0.0.0",
+                port=8000,
+                log_level="info"
+            )
     except Exception as exc:
         print("[ERROR] uvicorn failed:", exc)
-        # fallback to loopback (no TLS)
-        uvicorn.run("server:app", host="127.0.0.1", port=8000, log_level="info")
+        # Fallback in case of any unexpected error
+        uvicorn.run("server:app", host="0.0.0.0", port=8000, log_level="info")
+
+
